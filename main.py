@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import time
 
 
 def convert_srt_time_to_seconds(srt_time):
@@ -34,17 +35,32 @@ def convert_seconds_to_timestamp(seconds):
     return f"{int(hours)}-{int(minutes):02}-{seconds:02}-{milliseconds:03}"
 
 
+def get_video_resolution(video_path):
+    """Extract video resolution using ffmpeg."""
+    ffprobe_cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+        'stream=width,height', '-of', 'csv=p=0', video_path
+    ]
+    result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
+    width, height = result.stdout.strip().split(',')
+    return int(width), int(height)
+
+
 def main(video_path):
     # Extract the directory and filename without extension
     video_dir = os.path.dirname(video_path)
     video_name = os.path.splitext(os.path.basename(video_path))[0]
+
+    # Extract resolution
+    width, height = get_video_resolution(video_path)
+    original_size = f"{width}x{height}"
 
     # Determine the subtitle file path
     subtitle_path = os.path.join(video_dir, f"{video_name}.ass")
 
     subtitle_path_srt = subtitle_path.replace('.ass', '.srt')
 
-    srt_mode = os.path.exists(subtitle_path_srt)
+    srt_mode = False     # os.path.exists(subtitle_path_srt)
     if srt_mode:
         subtitle_path = subtitle_path_srt
 
@@ -80,20 +96,24 @@ def main(video_path):
             middle_seconds = (start_seconds + end_seconds) / 2 + offset
             timestamp = convert_seconds_to_timestamp(middle_seconds)
 
-            output_file = os.path.join(output_dir, f"{video_name}-{timestamp}.png")
+            output_file = os.path.join(output_dir, f"{video_name}-{timestamp}.jpg")
 
-            # Escape the subtitle path
-            pre_subtitle_path = subtitle_path.replace('\\', '\\\\').replace(':', '\:')
-            escaped_subtitle_path = pre_subtitle_path.replace('.srt', '.ass') if srt_mode else pre_subtitle_path
+            if not os.path.isfile(output_file):
+                # Escape the subtitle path
+                pre_subtitle_path = subtitle_path.replace('\\', '\\\\').replace(':', '\:')
+                escaped_subtitle_path = pre_subtitle_path.replace('.srt', '.ass') if srt_mode else pre_subtitle_path
 
-            # Use ffmpeg to create a screenshot
-            ffmpeg_args = [
-                'ffmpeg', '-ss', str(middle_seconds), '-copyts', '-i', video_path,
-                '-vf', f"subtitles='{escaped_subtitle_path}'",
-                '-vframes', '1', '-y', output_file
-            ]
-            print(f"Running ffmpeg with arguments: {' '.join(ffmpeg_args)}")
-            subprocess.run(ffmpeg_args, check=True)
+                # Use ffmpeg to create a screenshot
+                ffmpeg_args = [
+                    'ffmpeg', '-ss', str(middle_seconds), '-copyts', '-i', video_path,
+                    '-vf', f"subtitles='{escaped_subtitle_path}:original_size={original_size}',scale=-1:360'",
+                    '-vframes', '1', '-q:v', '20', '-y', output_file
+                ]
+                print(f"Running ffmpeg with arguments: {' '.join(ffmpeg_args)}")
+                subprocess.run(ffmpeg_args, check=True)
+            else:
+                print(f"{output_file} already exists, skipping to to next one")
+    # time.sleep(60)
 
 
 if __name__ == "__main__":
